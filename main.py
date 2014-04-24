@@ -31,10 +31,7 @@ def grade(queryVec, docsVec, queryID, fp):
 
     sortedScore = sorted(score.items(), key=lambda x:x[1], reverse=True)
 
-    for i in range(len(sortedScore)):
-        if sortedScore[i][1] < sortedScore[0][1]-0.1:
-            break
-
+    for i in range(min(len(sortedScore), 100)):
         print(sortedScore[i], file=sys.stderr)
         print(queryID, getDocName(sortedScore[i][0]), file=fp)
 
@@ -121,12 +118,6 @@ def parseString(string):
 
 
 def stopWordRemoval(string):
-    '''
-    stopWords = ['一', '了', '就', '說', '要', '大', '她', '最', '所', '可', 
-            '又', '才', '我', '他', '人', '們', '會', '能', '還', '己', 
-            '為', '將', '不', '也', '都', '你', '很', '著', '來', '兩', 
-            '好', '更']
-    '''
     for i in range(len(stopWords)):
         while True:
             try:
@@ -141,7 +132,7 @@ def queryProcess():
     tree = etree.parse(inputFileName)
     root = tree.getroot()
     nodes = ['title', 'question', 'narrative', 'concepts']
-    w = [10,3,1,10]  #tuning
+    w = [30,4,1,30]  #tuning
     strings = [ [] for i in range(len(nodes)) ]
 
 
