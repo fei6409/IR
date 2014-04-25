@@ -31,7 +31,7 @@ def grade(queryVec, docsVec, queryID, fp):
 
     sortedScore = sorted(score.items(), key=lambda x:x[1], reverse=True)
 
-    for i in range(min(len(sortedScore), 100)):
+    for i in range(min(len(sortedScore), 120)):
         print(sortedScore[i], file=sys.stderr)
         print(queryID, getDocName(sortedScore[i][0]), file=fp)
 
@@ -56,6 +56,7 @@ def genVector(queryDic):
 
 def addWeight(string, vector, w):
     strLen = len(string)
+#    visit = [0 for i in range(strLen)]
     symbol = '，。？！、：；'
     for i in range(strLen):
 #        if string[i] in symbol:
