@@ -4,6 +4,7 @@ import pickle
 import subprocess
 import sys
 import time
+import random
 import xml.etree.ElementTree as etree
 import numpy as np
 
@@ -14,14 +15,17 @@ def printTime():
     print('clock =', time.clock(), file=sys.stderr)
 
 
-def getDocName(docID):
-    tree = etree.parse(fileList[docID])
-    root = tree.getroot()
+def printAnswer(score, queryID, fp):
+    for i in range(min(len(score), 200)):
+        print(score[i], file=sys.stderr)
+        tree = etree.parse(fileList[score[i][0]])
+        root = tree.getroot()
 
-    return root.find('doc').find('id').text 
+        name = root.find('doc').find('id').text 
+        print(queryID, name, file=fp)
 
 
-def grade(queryVec, docsVec, queryID, fp):
+def grade(queryVec, docsVec):
     score = {}
 
     queryWeight = float(np.dot(queryVec, queryVec))
@@ -30,10 +34,21 @@ def grade(queryVec, docsVec, queryID, fp):
         score[i] = float(np.dot(queryVec, docsVec[i])) / math.sqrt( docWeight[i] * queryWeight )
 
     sortedScore = sorted(score.items(), key=lambda x:x[1], reverse=True)
+    return sortedScore
 
-    for i in range(min(len(sortedScore), 120)):
-        print(sortedScore[i], file=sys.stderr)
-        print(queryID, getDocName(sortedScore[i][0]), file=fp)
+def RocchioFeedback(queryDic, score):
+    random.seed()
+    scoreLen = len(score)
+    for r in range(10):
+        r = random.randrange(0, 1000)
+        rID = score[r][0]
+
+        for key in index[rID]:
+            if key not in queryDic:
+                queryDic[key] = 0
+            queryDic[key] += TFIDF[key][rID] * 0.01
+    printTime()
+    return queryDic
 
 
 def genVector(queryDic):
@@ -56,46 +71,32 @@ def genVector(queryDic):
 
 def addWeight(string, vector, w):
     strLen = len(string)
-#    visit = [0 for i in range(strLen)]
     symbol = '，。？！、：；'
-    for i in range(strLen):
-#        if string[i] in symbol:
-#            continue
+    i = 0
+    while i < strLen:
         #unigram
-        try:
-            charid = vocab.index(string[i])
-        except:
-            print('Unigram not found in vocab list', file=sys.stderr)
-            continue
-
-        if charid not in invIndexUnigram:
-            print('Unigram not found in inverted index', file=sys.stderr)
-            continue
-
-        if charid not in vector:
-            vector[charid] = 0
-        vector[charid] += w
-
-        #bigram
+        id1 = vocab.index(string[i])
         if i+1 < strLen:
-            try:
-                charid2 = vocab.index(string[i+1])
-            except:
-#                print('Bigram not found in vocab list', file=sys.stderr)
-                continue
+            id2 = vocab.index(string[i+1])
+        else:
+            id2 = -1
+        
+        tup = (id1, id2)
 
-            tup = (charid, charid2)
-            if tup not in invIndexBigram:
-#                print('Bigram not found in inverted index', file=sys.stderr)
-                continue
-            
+        if tup in invIndexBigram:
             if tup not in vector:
                 vector[tup] = 0
             vector[tup] += w
-
+        if id1 in invIndexUnigram:
+            if id1 not in vector:
+                vector[id1] = 0
+            vector[id1] += w
+        i += 1
+    
 
 def isChar(char):
     return ('a' <= char and char <= 'z') or ('A' <= char and char <= 'Z')
+
 
 def parseString(string):
     ans = []
@@ -143,7 +144,7 @@ def queryProcess():
         queryDic = {}
         queryID = topic.find('number').text
         queryID = queryID[len(queryID)-3:len(queryID)]
-        print('query ID =', queryID, file=sys.stderr)
+        print('Query ID =', queryID, file=sys.stderr)
 
         for i in range(len(nodes)):
             strings[i] = topic.find(nodes[i]).text.lstrip(delim).rstrip(delim)
@@ -151,11 +152,21 @@ def queryProcess():
             strings[i] = parseString(strings[i])
 
             addWeight(strings[i], queryDic, w[i])
-        print('query len =', len(queryDic), file=sys.stderr)
 
+        print('Query len =', len(queryDic), file=sys.stderr)
         (queryVec, docsVec) = genVector(queryDic)
+        print('#doc =', len(docsVec), file=sys.stderr)
+        score = grade(queryVec, docsVec)
 
-        grade(queryVec, docsVec, queryID, fp)
+        if releFeedback == True:
+            print('Doing RocchioFeedback', file=sys.stderr)
+            queryDic = RocchioFeedback(queryDic, score)
+            print('Query len =', len(queryDic), file=sys.stderr)
+            (queryVec, docsVec) = genVector(queryDic)
+            print('#doc =', len(docsVec), file=sys.stderr)
+            score = grade(queryVec, docsVec)
+
+        printAnswer(score, queryID, fp)
 
     fp.close()
 
@@ -164,14 +175,17 @@ def queryProcess():
 
 def TF_IDF():
     print('Doing TF_IDF', file=sys.stderr)
-    global TFIDF, docWeight
+    global TFIDF, docWeight, index
 
-    if os.path.isfile('TFIDF.dat') and os.path.isfile('docWeight.dat'): 
+    if os.path.isfile('TFIDF.dat') and os.path.isfile('docWeight.dat') and os.path.isfile('index.dat'): 
         f = open('TFIDF.dat', 'rb')
         TFIDF = pickle.load(f)
         f.close()
         f = open('docWeight.dat', 'rb')
         docWeight = pickle.load(f)
+        f.close()
+        f = open('index.dat', 'rb')
+        index = pickle.load(f)
         f.close()
 
     else:
@@ -180,6 +194,7 @@ def TF_IDF():
         TFIDF = {}
         docCnt = len(docSize)
         avgSize = 0
+        index = [[] for i in range(docCnt)]
         for i in range(docCnt):
             avgSize += docSize[i]
         avgSize /= docCnt
@@ -196,6 +211,7 @@ def TF_IDF():
                 v =  (invIndexUnigram[i][j] / d[j]) * IDF
                 TFIDF[i][j] = v
                 docWeight[j] += v * v
+                index[j].append(i)
 
         for i in invIndexBigram: # word id
             IDF = math.log( docCnt / len(invIndexBigram[i]) )
@@ -204,12 +220,16 @@ def TF_IDF():
                 v =  (invIndexBigram[i][j] / d[j]) * IDF
                 TFIDF[i][j] = v
                 docWeight[j] += v * v
+                index[j].append(i)
 
         f = open('TFIDF.dat', 'wb')
         pickle.dump(TFIDF, f)
         f.close()
         f = open('docWeight.dat', 'wb')
         pickle.dump(docWeight, f)
+        f.close()
+        f = open('index.dat', 'wb')
+        pickle.dump(index, f)
         f.close()
 
     printTime()
@@ -280,6 +300,8 @@ def readFile():
     else:
         print('.dat not exist, generating', file=sys.stderr)
         f = open(os.path.join(modelDir, 'inverted-index'), 'r')
+        fileLen = len(fileList)
+
         while True:
             line = f.readline()
             if(line == ''):
@@ -295,6 +317,9 @@ def readFile():
                 subline = f.readline()
                 (file_id, cnt) = list( map( int, subline.split(' ') ) )
                 dic[file_id] = cnt            
+
+            if n > fileLen*0.5:
+                continue
 
             if id2 == -1:
                 invIndexUnigram[id1] = dic
